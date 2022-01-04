@@ -192,7 +192,9 @@ func (manager *NetworkManager) Close() (err error) {
 	log.Debug("Close network manager")
 
 	if manager.trafficMonitoring != nil {
-		manager.trafficMonitoring.deleteAllTrafficChains()
+		if err := manager.trafficMonitoring.deleteAllTrafficChains(); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil
@@ -237,7 +239,9 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 
 	defer func() {
 		if err != nil {
-			netns.DeleteNamed(serviceID)
+			if delErr := netns.DeleteNamed(serviceID); delErr != nil {
+				log.Errorf("Can't delete named network namespace: %s", delErr)
+			}
 		}
 	}()
 
@@ -540,11 +544,19 @@ func (manager *NetworkManager) deleteNetwork(spID string) (err error) {
 
 	os.RemoveAll(networkDir)
 
-	return nil
+	return err
 }
 
 func (manager *NetworkManager) removeServiceFromNetwork(serviceID, spID string) (err error) {
-	defer netns.DeleteNamed(serviceID)
+	defer func() {
+		if delErr := netns.DeleteNamed(serviceID); delErr != nil {
+			log.Errorf("Can't delete named network namespace: %s", delErr)
+
+			if err == nil {
+				err = aoserrors.Wrap(delErr)
+			}
+		}
+	}()
 
 	networkConfig, runtimeConfig := getRuntimeNetConfig(serviceID, spID)
 

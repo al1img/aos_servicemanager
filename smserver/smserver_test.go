@@ -69,9 +69,6 @@ type testMonitoringProvider struct {
 	monitoringChannel chan *pb.Monitoring
 }
 
-type testStateProvider struct {
-}
-
 type testResourceManager struct {
 	version string
 }
@@ -117,7 +114,11 @@ func TestConnection(t *testing.T) {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -139,6 +140,10 @@ func TestConnection(t *testing.T) {
 	}
 
 	responceBoardCfg, err := client.pbclient.GetBoardConfigStatus(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get board configuration: %s", err)
+	}
+
 	if responceBoardCfg.GetVendorVersion() != "1.0" {
 		t.Errorf("incorrect boardConfig version %s", responceBoardCfg.GetVendorVersion())
 	}
@@ -178,7 +183,11 @@ func TestAlertNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server: %s", err)
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -289,7 +298,11 @@ func TestMonitoringNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -309,7 +322,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	monitoringToSend := &pb.Monitoring{SystemMonitoring: &pb.SystemMonitoring{
 		Ram: 10, UsedDisk: 20, Cpu: 30, InTraffic: 40, OutTraffic: 50},
 		Timestamp: timestamppb.Now(),
-		ServiceMonitoring: []*pb.ServiceMonitoring{&pb.ServiceMonitoring{
+		ServiceMonitoring: []*pb.ServiceMonitoring{{
 			ServiceId: "service1", Ram: 110, UsedDisk: 120, Cpu: 130, InTraffic: 140, OutTraffic: 150}}}
 
 	testMonitoring.monitoringChannel <- monitoringToSend
@@ -336,7 +349,11 @@ func TestServiceStateProcessing(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -464,7 +481,8 @@ func (resMgr *testResourceManager) UpdateBoardConfig(configJSON string) (err err
 func newTestClient(url string) (client *testClient, err error) {
 	client = &testClient{}
 
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	if client.connection, err = grpc.DialContext(ctx, url, grpc.WithInsecure(), grpc.WithBlock()); err != nil {
 		return nil, err

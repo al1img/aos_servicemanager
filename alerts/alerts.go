@@ -153,7 +153,9 @@ func (instance *Alerts) Close() {
 
 	instance.ticker.Stop()
 
-	instance.storeCurrentCursor()
+	if err := instance.storeCurrentCursor(); err != nil {
+		log.Errorf("Can't store cursor: %s", err)
+	}
 
 	instance.journal.Close()
 }

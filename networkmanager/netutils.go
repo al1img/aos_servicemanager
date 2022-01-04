@@ -59,10 +59,6 @@ func checkRouteOverlaps(toCheck *net.IPNet, networks []netlink.Route) (overlapsI
 	return false
 }
 
-func networkOverlaps(netX *net.IPNet, netY *net.IPNet) (sameIPNet bool) {
-	return netX.Contains(netY.IP) || netY.Contains(netX.IP)
-}
-
 func removeBridgeInterface(spID string) (err error) {
 	br, err := netlink.LinkByName(bridgePrefix + spID)
 	if err != nil {
@@ -90,7 +86,13 @@ func createNetNS(name string) (err error) {
 			return aoserrors.Wrap(err)
 		}
 		defer origin.Close()
-		defer netns.Set(origin)
+		defer func() {
+			if setErr := netns.Set(origin); setErr != nil {
+				if err == nil {
+					err = aoserrors.Wrap(setErr)
+				}
+			}
+		}()
 
 		newns, err := netns.NewNamed(name)
 		if err != nil {

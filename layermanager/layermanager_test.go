@@ -260,7 +260,7 @@ func (infoProvider *testInfoProvider) GetLayerInfoByDigest(digest string) (layer
 
 	layerInfo, ok := infoProvider.layers[digest]
 	if !ok {
-		return layer, aoserrors.New("layer does't exist")
+		return layer, aoserrors.New("layer does't exist") // nolint
 	}
 
 	return pb.LayerStatus{LayerId: layerInfo.id, Digest: digest, AosVersion: layerInfo.aosVersion}, nil

@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v1"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -242,7 +243,11 @@ func newTestServer(url string) (server *testServer, err error) {
 
 	server.permissionsCache = make(map[string]servicePermissions)
 
-	go server.grpcServer.Serve(listener)
+	go func() {
+		if err := server.grpcServer.Serve(listener); err != nil {
+			log.Errorf("Can't serve grpc server: %s", err)
+		}
+	}()
 
 	return server, nil
 }
@@ -322,7 +327,11 @@ func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAMP
 			return nil
 
 		case users := <-server.usersChangedChannel:
-			stream.Send(&pb.Users{Users: users})
+			if err := stream.Send(&pb.Users{Users: users}); err != nil {
+				return aoserrors.Wrap(err)
+			}
+
+			return nil
 		}
 	}
 }

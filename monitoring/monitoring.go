@@ -115,16 +115,6 @@ type ServiceMonitoringConfig struct {
 	ServiceRules  *ServiceAlertRules
 }
 
-type trafficMonitoring struct {
-	disabled     bool
-	addresses    string
-	currentValue uint64
-	initialValue uint64
-	subValue     uint64
-	limit        uint64
-	lastUpdate   time.Time
-}
-
 type serviceMonitoring struct {
 	serviceDir             string
 	uid                    uint32
@@ -219,7 +209,11 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
 
-	go monitor.run()
+	go func() {
+		if err := monitor.run(); err != nil {
+			log.Errorf("Can't run minitoring: %s", err)
+		}
+	}()
 
 	return monitor, nil
 }
@@ -241,7 +235,7 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	monitor.Lock()
 	defer monitor.Unlock()
 
-	load.Misc()
+	_, _ = load.Misc()
 
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		log.WithField("id", serviceID).Warning("Service already under monitoring")
@@ -399,11 +393,11 @@ func (monitor *Monitor) sendMonitoringData() {
 	channelData.ServiceMonitoring = make([]*pb.ServiceMonitoring, 0, len(monitor.serviceMap))
 
 	for _, service := range monitor.serviceMap {
-		serviceMonitoringData := service.monitoringData
+		serviceMonitoringData := service.monitoringData // nolint
 		channelData.ServiceMonitoring = append(channelData.ServiceMonitoring, &serviceMonitoringData)
 	}
 
-	currentSystemMonitoring := monitor.currentSystemData
+	currentSystemMonitoring := monitor.currentSystemData // nolint
 	channelData.SystemMonitoring = &currentSystemMonitoring
 	channelData.Timestamp = timestamppb.Now()
 

@@ -420,18 +420,18 @@ func (db *Database) GetUsersService(users []string, serviceID string) (usersServ
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		if err = rows.Scan(&usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-			return usersService, aoserrors.Wrap(err)
-		}
-
-		usersService.Users = users
-		usersService.ServiceID = serviceID
-
-		return usersService, nil
+	if !rows.Next() {
+		return usersService, ErrNotExist
 	}
 
-	return usersService, ErrNotExist
+	if err = rows.Scan(&usersService.StorageFolder, &usersService.StateChecksum); err != nil {
+		return usersService, aoserrors.Wrap(err)
+	}
+
+	usersService.Users = users
+	usersService.ServiceID = serviceID
+
+	return usersService, nil
 }
 
 // GetUsersServicesByServiceID returns users services by service ID
@@ -573,7 +573,7 @@ func (db *Database) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error
 			}
 		}
 
-		vars = append(vars, envVar)
+		vars = append(vars, envVar) // nolint
 	}
 
 	return vars, nil
@@ -743,21 +743,21 @@ func (db *Database) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 func (db *Database) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
 	stmt, err := db.sql.Prepare("SELECT layerId, aosVersion FROM layers WHERE digest = ?")
 	if err != nil {
-		return layer, aoserrors.Wrap(err)
+		return layer, aoserrors.Wrap(err) // nolint
 	}
 	defer stmt.Close()
 
 	err = stmt.QueryRow(digest).Scan(&layer.LayerId, &layer.AosVersion)
 	if err == sql.ErrNoRows {
-		return layer, ErrNotExist
+		return layer, ErrNotExist // nolint
 	}
 	if err != nil {
-		return layer, aoserrors.Wrap(err)
+		return layer, aoserrors.Wrap(err) // nolint
 	}
 
 	layer.Digest = digest
 
-	return layer, nil
+	return layer, nil // nolint
 }
 
 // Close closes database
@@ -950,24 +950,4 @@ func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
 	return aoserrors.Wrap(err)
-}
-
-func convertListToText(list []string) (listText string, err error) {
-	data, err := json.Marshal(list)
-	if err != nil {
-		return listText, aoserrors.Wrap(err)
-	}
-
-	listText = string(data)
-
-	return listText, nil
-}
-
-func getListfromText(text string) (list []string, err error) {
-	err = json.Unmarshal([]byte(text), &list)
-	if err != nil {
-		return list, aoserrors.Wrap(err)
-	}
-
-	return list, nil
 }

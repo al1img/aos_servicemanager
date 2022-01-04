@@ -86,7 +86,7 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []*pb.OverrideEnvVa
 
 	var resultError error
 
-	for currentIndex, currentVar := range provider.currentEnvVars {
+	for currentIndex, currentVar := range provider.currentEnvVars { // nolint
 		presentInDesired := false
 
 		for desIndex, desValue := range vars {

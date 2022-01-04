@@ -276,7 +276,10 @@ func (monitor *trafficMonitoring) deleteTrafficChain(chain, rootChain string) (e
 
 	// Store traffic data to DB
 	if traffic, ok := monitor.trafficMap[chain]; ok {
-		monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
+		if err := monitor.trafficStorage.SetTrafficMonitorData(chain,
+			traffic.lastUpdate, traffic.currentValue); err != nil {
+			log.Errorf("Can't set traffic monitoring: %s", err)
+		}
 	}
 
 	delete(monitor.trafficMap, chain)

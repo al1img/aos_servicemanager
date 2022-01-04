@@ -68,15 +68,6 @@ type testCursorStorage struct {
 	cursor string
 }
 
-type validateAlert struct {
-	source  string
-	message map[string][]error
-}
-
-type testAlerts struct {
-	AlertsChannel chan pb.Alert
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -501,10 +492,6 @@ func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration, checkAler
 	}
 }
 
-func (alertChecker *testAlerts) SendAlert(alert pb.Alert) {
-	alertChecker.AlertsChannel <- alert
-}
-
 func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 	tag, source string, version uint64, data []string) (err error) {
 	return waitResult(alertsChannel, timeout, func(alert *pb.Alert) (success bool, err error) {
@@ -622,12 +609,4 @@ func stopService(serviceID string) (err error) {
 
 func crashService(serviceID string) {
 	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
-}
-
-func compareValidateAlerts(first validateAlert, second validateAlert) (result bool) {
-	if first.source != second.source {
-		return false
-	}
-
-	return reflect.DeepEqual(first.message, second.message)
 }

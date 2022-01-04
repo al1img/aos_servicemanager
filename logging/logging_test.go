@@ -376,7 +376,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if systemd, err = dbus.NewSystemConnection(); err != nil {
+	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
 		return err
 	}
 

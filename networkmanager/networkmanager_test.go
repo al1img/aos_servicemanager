@@ -78,7 +78,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestAddRemoveService(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	numServices := 10
 
@@ -127,7 +127,7 @@ func TestAddRemoveService(t *testing.T) {
 
 func TestDeleteAllNetworks(t *testing.T) {
 	t.Cleanup(func() {
-		manager.DeleteAllNetworks()
+		_ = manager.DeleteAllNetworks()
 	})
 
 	numNetworks := 3
@@ -157,7 +157,7 @@ func TestDeleteAllNetworks(t *testing.T) {
 }
 
 func TestInternet(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	containerPath := path.Join(tmpDir, "servicenm1")
 
@@ -178,8 +178,8 @@ func TestInternet(t *testing.T) {
 
 func TestInterServiceConnection(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("servicenm2")
-		manager.DeleteNetwork("network0")
+		_ = killOCIContainer("servicenm2")
+		_ = manager.DeleteNetwork("network0")
 	})
 
 	container0Path := path.Join(tmpDir, "servicenm2")
@@ -192,7 +192,11 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "servicenm2")
+	go func() {
+		if err := runOCIContainer(container0Path, "servicenm2"); err != nil {
+			t.Errorf("Can't run container %s:", err)
+		}
+	}()
 
 	container1Path := path.Join(tmpDir, "servicenm3")
 
@@ -218,7 +222,7 @@ func TestInterServiceConnection(t *testing.T) {
 }
 
 func TestHostName(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	container0Path := path.Join(tmpDir, "servicenm4")
 
@@ -240,9 +244,9 @@ func TestHostName(t *testing.T) {
 
 func TestExposedPortAndAllowedConnection(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("serviceServer")
-		manager.DeleteNetwork("networkSP1")
-		manager.DeleteNetwork("networkSP2")
+		_ = killOCIContainer("serviceServer")
+		_ = manager.DeleteNetwork("networkSP1")
+		_ = manager.DeleteNetwork("networkSP2")
 	})
 
 	serverPort := "9000"
@@ -263,7 +267,11 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 		t.Fatalf("Can't get ip address from service: %s", err)
 	}
 
-	go runOCIContainer(containerServerPath, serverServiceID)
+	go func() {
+		if err := runOCIContainer(containerServerPath, serverServiceID); err != nil {
+			t.Errorf("Can't run container %s:", err)
+		}
+	}()
 
 	time.Sleep(1 * time.Second)
 
@@ -286,9 +294,9 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 
 func TestNetworkDNS(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("service0")
-		manager.DeleteNetwork("network0")
-		manager.DeleteNetwork("network1")
+		_ = killOCIContainer("service0")
+		_ = manager.DeleteNetwork("network0")
+		_ = manager.DeleteNetwork("network1")
 	})
 
 	container0Path := path.Join(tmpDir, "service0")
@@ -304,7 +312,11 @@ func TestNetworkDNS(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "service0")
+	go func() {
+		if err := runOCIContainer(container0Path, "service0"); err != nil {
+			t.Errorf("Can't run container %s:", err)
+		}
+	}()
 
 	container1Path := path.Join(tmpDir, "service1")
 
@@ -367,8 +379,8 @@ func TestNetworkDNS(t *testing.T) {
 
 func TestBandwidth(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("service0")
-		manager.DeleteNetwork("network0")
+		_ = killOCIContainer("service0")
+		_ = manager.DeleteNetwork("network0")
 	})
 
 	container0Path := path.Join(tmpDir, "service0")
@@ -387,7 +399,11 @@ func TestBandwidth(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "service0")
+	go func() {
+		if err := runOCIContainer(container0Path, "service0"); err != nil {
+			t.Errorf("Can't run container %s:", err)
+		}
+	}()
 
 	ip, err := manager.GetServiceIP("service0", "network0")
 	if err != nil {

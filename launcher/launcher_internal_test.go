@@ -92,17 +92,6 @@ type testMonitor struct {
 	stopChannel  chan string
 }
 
-type stateRequest struct {
-	serviceID    string
-	defaultState bool
-}
-
-// Test sender
-type testSender struct {
-	ServiceStateChannel chan *pb.NewServiceState
-	stateRequestChannel chan stateRequest
-}
-
 type testServiceProvider struct {
 	sync.Mutex
 	services      map[string]*Service
@@ -182,7 +171,7 @@ func TestInstallRemove(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -311,7 +300,7 @@ func TestCheckServicesConsistency(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -372,7 +361,7 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -449,7 +438,7 @@ func TestErrors(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -527,7 +516,7 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -647,7 +636,7 @@ func TestAOSSecret(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -706,7 +695,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -727,7 +716,7 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -765,7 +754,7 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -804,7 +793,7 @@ func TestUsersServices(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -909,7 +898,7 @@ func TestServiceTTL(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -977,7 +966,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1055,7 +1044,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1083,7 +1072,11 @@ func TestServiceStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	service, err := launcher.serviceProvider.GetService("service0")
 	if err != nil {
@@ -1134,7 +1127,7 @@ func TestServiceState(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1165,11 +1158,13 @@ func TestServiceState(t *testing.T) {
 		stateData := []byte("Default")
 		calcSum := sha3.Sum224([]byte(stateData))
 
-		launcher.SetServiceState(&pb.ServiceState{
+		if err := launcher.SetServiceState(&pb.ServiceState{
 			ServiceId:     "service0",
 			Users:         &pb.Users{Users: users},
 			State:         stateData,
-			StateChecksum: hex.EncodeToString(calcSum[:])})
+			StateChecksum: hex.EncodeToString(calcSum[:])}); err != nil {
+			t.Errorf("Can't set service state: %s", err)
+		}
 
 		time.Sleep(1 * time.Second)
 
@@ -1184,7 +1179,11 @@ func TestServiceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -1200,8 +1199,10 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
-			Result: "accepted"})
+		if err := launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result: "accepted"}); err != nil {
+			t.Errorf("Can't call state acceptance: %s", err)
+		}
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1221,8 +1222,10 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
-			Result: "accepted", Reason: "just because"})
+		if err := launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result: "accepted", Reason: "just because"}); err != nil {
+			t.Errorf("Can't call state acceptance: %s", err)
+		}
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1234,7 +1237,11 @@ func TestServiceState(t *testing.T) {
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	response, err := ftp.Retr("state.dat")
 	if err != nil {
@@ -1272,7 +1279,11 @@ func TestServiceState(t *testing.T) {
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	if response, err = ftp.Retr("state.dat"); err != nil {
 		t.Errorf("Can't retrieve state file: %s", err)
@@ -1299,7 +1310,7 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1323,8 +1334,7 @@ func TestTmpDir(t *testing.T) {
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
 
-	ftp, err := launcher.connectToFtp("service0")
-	if err == nil {
+	if _, err = launcher.connectToFtp("service0"); err == nil {
 		t.Error("Unexpected nil error")
 	}
 
@@ -1357,7 +1367,7 @@ func TestTmpDir(t *testing.T) {
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
 
-	ftp, err = launcher.connectToFtp("service1")
+	ftp, err := launcher.connectToFtp("service1")
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
@@ -1372,7 +1382,9 @@ func TestTmpDir(t *testing.T) {
 		t.Error("Unexpected nil error")
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	// Test tmp works after restarts
 
@@ -1398,7 +1410,9 @@ func TestTmpDir(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 }
 
 func TestSpec(t *testing.T) {
@@ -1646,7 +1660,9 @@ func TestServiceWithLayers(t *testing.T) {
 	}
 	defer resp.Close()
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
@@ -1707,7 +1723,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -1790,7 +1806,7 @@ func TestManifestValidation(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1857,7 +1873,7 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1898,7 +1914,9 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	// Update service
 	serviceURL, fileInfo, err = ftpService.PrepareService()
@@ -1928,7 +1946,11 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	r, err := ftp.Retr("test1.dat")
 	if err != nil {
@@ -1941,7 +1963,7 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Errorf("Failed to read ftp buffer %s", err)
 	}
 
-	if bytes.Compare(writeBuf, readBuf) != 0 {
+	if !bytes.Equal(writeBuf, readBuf) {
 		t.Error("Read and write buffers should be equal")
 	}
 }
@@ -2015,7 +2037,9 @@ func TestChangeUsers(t *testing.T) {
 	}
 	defer resp.Close()
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	users2 := []string{"User2"}
 	if err = launcher.SetUsers(users2); err != nil {
@@ -2062,7 +2086,7 @@ func TestChangeUsers(t *testing.T) {
 
 func newTestLauncher(monitor ServiceMonitor, serviceHealthCheck time.Duration) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTLDays: 30, Runner: getRuntime(), ServiceHealthCheckTimeout: config.Duration{serviceHealthCheck}},
+		DefaultServiceTTLDays: 30, Runner: getRuntime(), ServiceHealthCheckTimeout: config.Duration{Duration: serviceHealthCheck}},
 		&serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err
@@ -2388,28 +2412,6 @@ func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
 	return nil
 }
 
-func newTestSender() (sender *testSender) {
-	sender = &testSender{}
-
-	sender.stateRequestChannel = make(chan stateRequest, 32)
-	sender.ServiceStateChannel = make(chan *pb.NewServiceState, 32)
-
-	return sender
-}
-
-func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) {
-	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
-}
-
-func (sender *testSender) SendNewServiceState(correlationID, serviceID, checksum string, state []byte) {
-	sender.ServiceStateChannel <- &pb.NewServiceState{CorrelationId: correlationID,
-		ServiceState: &pb.ServiceState{
-			ServiceId:     serviceID,
-			StateChecksum: checksum,
-			State:         state,
-		}}
-}
-
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
@@ -2672,7 +2674,7 @@ func (layerProvider *testLayerProvider) GetLayersInfo() (info []*pb.LayerStatus,
 }
 
 func (layerProvider *testLayerProvider) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	return layer, nil
+	return layer, nil //nolint
 }
 
 func (deviceManager *testDeviceManager) GetBoardConfigError() (err error) {
@@ -2815,7 +2817,7 @@ func cleanup() (err error) {
 func createTestPartition(mountPoint string, fsType string, size uint64) (err error) {
 	defer func() {
 		if err != nil {
-			deleteTestPartition(mountPoint)
+			_ = deleteTestPartition(mountPoint)
 		}
 	}()
 
@@ -3077,7 +3079,7 @@ func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.Ser
 	}
 
 	if err = ftpConnection.Login("anonymous", "anonymous"); err != nil {
-		ftpConnection.Quit()
+		_ = ftpConnection.Quit()
 		return nil, err
 	}
 

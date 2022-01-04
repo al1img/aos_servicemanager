@@ -40,14 +40,10 @@ import (
  ******************************************************************************/
 
 const manifestFileName = "manifest.json"
-const decryptDir = "/tmp/decrypt"
 
 /*******************************************************************************
  * Type
  ******************************************************************************/
-
-type imageHandler struct {
-}
 
 type imageParts struct {
 	imageConfigPath    string
@@ -133,7 +129,7 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 		}
 	}
 
-	if verifier.Verified() == false {
+	if !verifier.Verified() {
 		return aoserrors.New("hash missmach")
 	}
 
@@ -159,7 +155,7 @@ func packImage(source, name string) (err error) {
 	tarWriter := tar.NewWriter(gzWriter)
 	defer tarWriter.Close()
 
-	return filepath.Walk(source, func(fileName string, fileInfo os.FileInfo, err error) error {
+	return filepath.Walk(source, func(fileName string, fileInfo os.FileInfo, inErr error) error {
 		header, err := tar.FileInfoHeader(fileInfo, fileInfo.Name())
 		if err != nil {
 			return aoserrors.Wrap(err)

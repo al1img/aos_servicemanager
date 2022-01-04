@@ -23,7 +23,6 @@ import (
 	"os"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/fs"
@@ -35,19 +34,9 @@ import (
  * Consts
  ******************************************************************************/
 
-const umountRetry = 3
-const umountDelay = 1 * time.Second
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
-
-type mountInfo struct {
-	source       string
-	destintation string
-	mountType    string
-	options      string
-}
 
 /*******************************************************************************
  * Private

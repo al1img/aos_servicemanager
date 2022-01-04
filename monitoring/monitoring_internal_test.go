@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
@@ -269,7 +270,7 @@ func TestServices(t *testing.T) {
 	// Wait while .ip amd .pid files are created
 	time.Sleep(1 * time.Second)
 
-	err = monitor.StartMonitorService("service1",
+	if err = monitor.StartMonitorService("service1",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service1",
 			UID:        5000,
@@ -294,12 +295,11 @@ func TestServices(t *testing.T) {
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}})
-	if err != nil {
+					MaxThreshold: 0}}}); err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	monitor.StartMonitorService("service2",
+	if err = monitor.StartMonitorService("service2",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service2",
 			UID:        5002,
@@ -324,8 +324,7 @@ func TestServices(t *testing.T) {
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}})
-	if err != nil {
+					MaxThreshold: 0}}}); err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
@@ -387,8 +386,13 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 
-	runContainerWait("service1", cmd1)
-	runContainerWait("service2", cmd2)
+	if err = runContainerWait("service1", cmd1); err != nil {
+		t.Errorf("Can't run container: %s", err)
+	}
+
+	if err = runContainerWait("service2", cmd2); err != nil {
+		t.Errorf("Can't run container: %s", err)
+	}
 }
 
 func TestTrafficLimit(t *testing.T) {
@@ -658,9 +662,13 @@ func runContainerCmd(imagePath string, containerID string, downloadLimit, upload
 }
 
 func runContainerWait(containerID string, cmd *exec.Cmd) (err error) {
-	err = cmd.Wait()
+	if err = cmd.Wait(); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	networkManager.RemoveServiceFromNetwork(containerID, "default")
+	if err = networkManager.RemoveServiceFromNetwork(containerID, "default"); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	return err
+	return nil
 }

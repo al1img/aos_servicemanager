@@ -286,8 +286,7 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 	}
 
 	// request not existed device class
-	deviceResource, err = rm.RequestDeviceResourceByName("some_unavailable_device")
-	if err == nil {
+	if _, err = rm.RequestDeviceResourceByName("some_unavailable_device"); err == nil {
 		t.Fatalf("Can request resource: some_unavailable_device")
 	}
 }
@@ -309,7 +308,7 @@ func TestRequestBoardResourceByName(t *testing.T) {
 	}
 
 	originalConfig := BoardResource{Name: "system-dbus",
-		Mounts: []FileSystemMount{FileSystemMount{Destination: "/var/run/dbus/system_bus_socket",
+		Mounts: []FileSystemMount{{Destination: "/var/run/dbus/system_bus_socket",
 			Options: []string{"rw", "bind"},
 			Source:  "/var/run/dbus/system_bus_socket",
 			Type:    "bind"}},

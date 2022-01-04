@@ -1943,7 +1943,9 @@ func (launcher *Launcher) addService(service Service, users []string) (err error
 		if err != nil {
 			log.WithField("id", service.ID).Errorf("Error adding service: %s", err)
 
-			launcher.removeService(service)
+			if err := launcher.removeService(service); err != nil {
+				log.Errorf("Can't remove service: %s", err)
+			}
 		}
 	}()
 
@@ -1976,7 +1978,9 @@ func (launcher *Launcher) updateService(oldService, newService Service, users []
 			}
 
 			if err := launcher.restoreService(oldService); err != nil {
-				launcher.removeService(oldService)
+				if err := launcher.removeService(oldService); err != nil {
+					log.Errorf("Can't remove old service: %s", err)
+				}
 			}
 		}
 	}()
@@ -2123,7 +2127,7 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 func (launcher *Launcher) cleanupLayers() (retErr error) {
 	layersToRemove, retErr := launcher.layerProvider.GetLayersInfo()
 	if retErr != nil {
-		aoserrors.Wrap(retErr)
+		return aoserrors.Wrap(retErr)
 	}
 
 	if len(layersToRemove) == 0 {

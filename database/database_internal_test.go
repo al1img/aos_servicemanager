@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -744,7 +745,8 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if err := db.SetOperationVersion(uint64(i)); err != nil {
-				t.Fatalf("Can't set operation version: %s", err)
+				t.Errorf("Can't set operation version: %s", err)
+				return
 			}
 		}
 	}()
@@ -754,7 +756,8 @@ func TestMultiThread(t *testing.T) {
 
 		_, err := db.GetOperationVersion()
 		if err != nil {
-			t.Fatalf("Can't get Operation Version : %s", err)
+			t.Errorf("Can't get Operation Version : %s", err)
+			return
 		}
 	}()
 
@@ -763,7 +766,8 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if err := db.SetJournalCursor(strconv.Itoa(i)); err != nil {
-				t.Fatalf("Can't set journal cursor: %s", err)
+				t.Errorf("Can't set journal cursor: %s", err)
+				return
 			}
 		}
 	}()
@@ -773,7 +777,8 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if _, err := db.GetJournalCursor(); err != nil {
-				t.Fatalf("Can't get journal cursor: %s", err)
+				t.Errorf("Can't get journal cursor: %s", err)
+				return
 			}
 		}
 	}()
@@ -912,18 +917,6 @@ func (db *Database) getUsersList() (usersList [][]string, err error) {
 	return usersList, rows.Err()
 }
 
-func createDir(t *testing.T, name string, errorMessage string) {
-	if err := os.MkdirAll(name, 0755); err != nil {
-		t.Fatalf("%s: %s", errorMessage, err)
-	}
-}
-
-func removeDir(t *testing.T, name string, errorMessage string) {
-	if err := os.RemoveAll(name); err != nil {
-		t.Fatalf("%s: %s", errorMessage, err)
-	}
-}
-
 func createDatabaseV0(name string) (err error) {
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
 		name, busyTimeout, journalMode, syncMode))
@@ -946,7 +939,7 @@ func createDatabaseV0(name string) (err error) {
 		return err
 	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
 															   aosVersion INTEGER,
 															   serviceProvider TEXT,
 															   path TEXT,
@@ -970,25 +963,33 @@ func createDatabaseV0(name string) (err error) {
 															   deviceResources TEXT,
 															   boardResources TEXT,
 															   vendorVersion TEXT,
-															   description TEXT)`)
+															   description TEXT)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
 															serviceid TEXT NOT NULL,
 															storageFolder TEXT,
 															stateCheckSum BLOB,
-															PRIMARY KEY(users, serviceid))`)
+															PRIMARY KEY(users, serviceid))`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
 																	 time TIMESTAMP,
-																	 value INTEGER)`)
+																	 value INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
 															 layerId TEXT,
 															 path TEXT,
 															 osVersion TEXT,
 															 vendorVersion TEXT,
 															 description TEXT,
-															 aosVersion INTEGER)`)
+															 aosVersion INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
 	return nil
 }
@@ -1001,7 +1002,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	defer rows.Close()
 
 	var count int
-	for rows.Next() {
+	if rows.Next() {
 		if err = rows.Scan(&count); err != nil {
 			return err
 		}
@@ -1009,8 +1010,6 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 		if count == 0 {
 			return ErrNotExist
 		}
-
-		break
 	}
 
 	servicesRows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('services') WHERE name='exposedPorts'")
@@ -1019,20 +1018,20 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	}
 	defer servicesRows.Close()
 
-	count = 0
-	for servicesRows.Next() {
-		if err = servicesRows.Scan(&count); err != nil {
-			return err
-		}
-
-		if count == 0 {
-			return ErrNotExist
-		}
-
-		return nil
+	if !servicesRows.Next() {
+		return ErrNotExist
 	}
 
-	return ErrNotExist
+	count = 0
+	if err = servicesRows.Scan(&count); err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
 }
 
 func isDatabaseVer0(sqlite *sql.DB) (err error) {
@@ -1043,7 +1042,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	defer rows.Close()
 
 	var count int
-	for rows.Next() {
+	if rows.Next() {
 		if err = rows.Scan(&count); err != nil {
 			return err
 		}
@@ -1051,8 +1050,6 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 		if count != 0 {
 			return ErrNotExist
 		}
-
-		break
 	}
 
 	servicesRows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='exposedPorts'")
@@ -1061,18 +1058,18 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 	defer servicesRows.Close()
 
-	count = 0
-	for servicesRows.Next() {
-		if err = servicesRows.Scan(&count); err != nil {
-			return err
-		}
-
-		if count != 0 {
-			return ErrNotExist
-		}
-
-		return nil
+	if !servicesRows.Next() {
+		return ErrNotExist
 	}
 
-	return ErrNotExist
+	count = 0
+	if err = servicesRows.Scan(&count); err != nil {
+		return err
+	}
+
+	if count != 0 {
+		return ErrNotExist
+	}
+
+	return nil
 }
