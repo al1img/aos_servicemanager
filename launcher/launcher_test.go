@@ -27,6 +27,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
@@ -74,6 +75,7 @@ type testInstance struct {
 	serviceVersion uint64
 	subjectID      string
 	numInstances   uint64
+	unitSubject    bool
 	err            error
 }
 
@@ -355,6 +357,109 @@ func TestStopAllInstances(t *testing.T) {
 	}
 }
 
+func TestSubjectsChanged(t *testing.T) {
+	type testData struct {
+		initialInstances []testInstance
+		subjects         []string
+		resultInstances  []testInstance
+	}
+
+	data := []testData{
+		{
+			initialInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
+			},
+			subjects: []string{"subject2"},
+			resultInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4},
+			},
+		},
+		{
+			initialInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
+			},
+			subjects: []string{"subject1"},
+			resultInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+			},
+		},
+		{
+			initialInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
+			},
+			subjects: []string{"subject1", "subject2"},
+			resultInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4},
+			},
+		},
+		{
+			initialInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
+				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
+				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
+			},
+			subjects: []string{"subject3"},
+			resultInstances: []testInstance{
+				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+			},
+		},
+	}
+
+	storage := newTestStorage()
+	serviceProvider := newTestServiceProvider()
+
+	testLauncher, err := launcher.New(&config.Config{}, storage, serviceProvider, newTestRunner(nil, nil))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer testLauncher.Close()
+
+	for i, item := range data {
+		t.Logf("Subjects changed: %d", i)
+
+		if err = serviceProvider.fromTestInstances(item.initialInstances); err != nil {
+			t.Fatalf("Can't create test services: %s", err)
+		}
+
+		storage.createInstances(item.initialInstances)
+
+		if err = testLauncher.SubjectsChanged(item.subjects); err != nil {
+			t.Fatalf("Subjects changed error: %s", err)
+		}
+
+		select {
+		case runtimeStatus := <-testLauncher.RuntimeStatusChannel():
+			runStatus := &launcher.RunInstancesStatus{
+				UnitSubjects: item.subjects,
+				Instances:    createInstancesStatuses(item.resultInstances),
+			}
+
+			if err = compareRuntimeStatus(launcher.RuntimeStatus{RunStatus: runStatus}, runtimeStatus); err != nil {
+				t.Errorf("Compare runtime status failed: %s", err)
+			}
+
+		case <-time.After(5 * time.Second):
+			t.Error("Wait for runtime status timeout")
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
@@ -455,6 +560,33 @@ func (storage *testStorage) getInstanceByID(instanceID string) (launcher.Instanc
 	}
 
 	return instance, nil
+}
+
+func (storage *testStorage) createInstances(testInstances []testInstance) {
+	storage.Lock()
+	defer storage.Unlock()
+
+	for _, testInstance := range testInstances {
+		for i := uint64(0); i < testInstance.numInstances; i++ {
+			newInstanceID := uuid.New().String()
+
+			for instanceID, instance := range storage.instances {
+				if instance.ServiceID == testInstance.serviceID && instance.SubjectID == testInstance.subjectID &&
+					instance.Index == i {
+					newInstanceID = instanceID
+				}
+			}
+
+			storage.instances[newInstanceID] = launcher.InstanceInfo{
+				ServiceID:   testInstance.serviceID,
+				SubjectID:   testInstance.subjectID,
+				InstanceID:  newInstanceID,
+				Index:       i,
+				UnitSubject: testInstance.unitSubject,
+				Running:     true,
+			}
+		}
+	}
 }
 
 /***********************************************************************************************************************
