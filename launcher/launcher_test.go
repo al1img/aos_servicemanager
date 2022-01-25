@@ -19,7 +19,9 @@ package launcher_test
 
 import (
 	"errors"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -77,6 +79,30 @@ type testInstance struct {
 	numInstances   uint64
 	unitSubject    bool
 	err            error
+}
+
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var tmpDir string
+
+/***********************************************************************************************************************
+ * Main
+ **********************************************************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Setup error: %s", err)
+	}
+
+	ret := m.Run()
+
+	if err := cleanup(); err != nil {
+		log.Errorf("Cleanup error: %s", err)
+	}
+
+	os.Exit(ret)
 }
 
 /***********************************************************************************************************************
@@ -160,7 +186,7 @@ func TestRunInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{}, storage, serviceProvider, instanceRunner)
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -198,7 +224,7 @@ func TestUpdateInstances(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	instanceRunner := newTestRunner(nil, nil)
 
-	testLauncher, err := launcher.New(&config.Config{}, storage, serviceProvider, instanceRunner)
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -252,7 +278,7 @@ func TestUpdateInstances(t *testing.T) {
 func TestSendCurrentRuntimeStatus(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
-	testLauncher, err := launcher.New(&config.Config{}, newTestStorage(), serviceProvider,
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
 		newTestRunner(nil, nil))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
@@ -313,7 +339,8 @@ func TestStopAllInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{}, newTestStorage(), serviceProvider, instanceRunner)
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
+		instanceRunner)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -424,7 +451,8 @@ func TestSubjectsChanged(t *testing.T) {
 	storage := newTestStorage()
 	serviceProvider := newTestServiceProvider()
 
-	testLauncher, err := launcher.New(&config.Config{}, storage, serviceProvider, newTestRunner(nil, nil))
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestRunner(nil, nil))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -456,6 +484,64 @@ func TestSubjectsChanged(t *testing.T) {
 
 		case <-time.After(5 * time.Second):
 			t.Error("Wait for runtime status timeout")
+		}
+	}
+}
+
+func TestHostFSDir(t *testing.T) {
+	hostFSBinds := []string{"bin", "sbin", "lib", "lib64", "usr"}
+
+	testLauncher, err := launcher.New(&config.Config{
+		WorkingDir: tmpDir,
+		HostBinds:  hostFSBinds,
+	},
+		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer testLauncher.Close()
+
+	rootItems, err := ioutil.ReadDir("/")
+	if err != nil {
+		t.Fatalf("Can't read root dir: %s", err)
+	}
+
+	whiteoutItems, err := ioutil.ReadDir(filepath.Join(tmpDir, "hostfs", "whiteouts"))
+	if err != nil {
+		t.Fatalf("Can't read root dir: %s", err)
+	}
+
+	for _, rootItem := range rootItems {
+		bind := false
+
+		for _, hostFSBind := range hostFSBinds {
+			if rootItem.Name() == hostFSBind {
+				bind = true
+				break
+			}
+		}
+
+		whiteout := false
+
+		for i, whiteoutItem := range whiteoutItems {
+			if rootItem.Name() == whiteoutItem.Name() {
+				if whiteoutItem.Mode() != 0o410000000 {
+					t.Errorf("Wrong white out mode 0o%o", whiteoutItem.Mode())
+				}
+
+				whiteoutItems = append(whiteoutItems[:i], whiteoutItems[i+1:]...)
+				whiteout = true
+
+				break
+			}
+		}
+
+		if bind && whiteout {
+			t.Errorf("Bind item %s should not be whiteouted", rootItem.Name())
+		}
+
+		if !bind && !whiteout {
+			t.Errorf("Not bind item %s should be whiteouted", rootItem.Name())
 		}
 	}
 }
@@ -669,6 +755,23 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
+
+func setup() (err error) {
+	tmpDir, err = ioutil.TempDir("", "sm_")
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func cleanup() (err error) {
+	if err = os.RemoveAll(tmpDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
 
 func compareRuntimeStatus(status1, status2 launcher.RuntimeStatus) (err error) {
 	switch {

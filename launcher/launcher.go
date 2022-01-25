@@ -20,14 +20,19 @@ package launcher
 import (
 	"context"
 	"errors"
+	"io/ioutil"
+	"os"
+	"path"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/utils/action"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/runner"
@@ -41,6 +46,8 @@ import (
 const maxParallelInstanceActions = 32
 
 const runtimeDir = "/run/aos/runtime"
+
+const hostFSWiteoutsDir = "hostfs/whiteouts"
 
 /***********************************************************************************************************************
  * Types
@@ -104,6 +111,7 @@ type Launcher struct {
 	serviceProvider ServiceProvider
 	instanceRunner  InstanceRunner
 
+	config                 *config.Config
 	currentSubjects        []string
 	runtimeStatusChannel   chan RuntimeStatus
 	cancelFunction         context.CancelFunc
@@ -125,6 +133,8 @@ var (
 	ErrNoRuntimeStatus = errors.New("no runtime status")
 )
 
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
+
 /***********************************************************************************************************************
  * Public
  **********************************************************************************************************************/
@@ -138,6 +148,7 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
 
+		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
 		runtimeStatusChannel: make(chan RuntimeStatus, 1),
 	}
@@ -147,6 +158,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 	launcher.cancelFunction = cancelFunction
 
 	go launcher.handleRunnerStatus(ctx)
+
+	if err = launcher.prepareHostFSDir(); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
 
 	// TODO: remove not needed DB entries
 
@@ -583,4 +598,50 @@ func isSubjectsEqual(subjects1, subjects2 []string) bool {
 	}
 
 	return true
+}
+
+func (launcher *Launcher) prepareHostFSDir() (err error) {
+	witeoutsDir := path.Join(launcher.config.WorkingDir, hostFSWiteoutsDir)
+
+	if err = os.MkdirAll(witeoutsDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	allowedDirs := defaultHostFSBinds
+
+	if len(launcher.config.HostBinds) > 0 {
+		allowedDirs = launcher.config.HostBinds
+	}
+
+	rootContent, err := ioutil.ReadDir("/")
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+rootLabel:
+	for _, item := range rootContent {
+		itemPath := path.Join(witeoutsDir, item.Name())
+
+		if _, err = os.Stat(itemPath); err == nil {
+			// skip already exists items
+			continue
+		}
+
+		if !os.IsNotExist(err) {
+			return aoserrors.Wrap(err)
+		}
+
+		for _, allowedItem := range allowedDirs {
+			if item.Name() == allowedItem {
+				continue rootLabel
+			}
+		}
+
+		// Create whiteout for not allowed items
+		if err = syscall.Mknod(itemPath, syscall.S_IFCHR, int(unix.Mkdev(0, 0))); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
 }
