@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"github.com/aoscloud/aos_common/aoserrors"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
@@ -30,7 +31,9 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	err error
+	serviceConfig *serviceConfig
+	imageConfig   *imagespec.Image
+	err           error
 }
 
 /***********************************************************************************************************************
@@ -53,6 +56,18 @@ func (launcher *Launcher) getCurrentServices(instances []InstanceInfo) (currentS
 		if service.ServiceInfo, service.err = launcher.serviceProvider.GetServiceInfo(
 			instance.ServiceID); service.err != nil {
 			log.WithField("serviceID", instance.ServiceID).Errorf("Can't get service info: %s", service.err)
+		}
+
+		if service.err == nil {
+			if service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo); service.err != nil {
+				log.WithField("serviceID", instance.ServiceID).Errorf("Can't get service config: %s", service.err)
+			}
+		}
+
+		if service.err == nil {
+			if service.imageConfig, service.err = launcher.getImageConfig(service.ServiceInfo); service.err != nil {
+				log.WithField("serviceID", instance.ServiceID).Errorf("Can't get image config: %s", service.err)
+			}
 		}
 
 		currentServices[instance.ServiceID] = &service

@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"encoding/hex"
+	"path/filepath"
 
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
@@ -33,6 +34,7 @@ import (
 type instanceInfo struct {
 	InstanceInfo
 	runStatus      runner.InstanceStatus
+	runtimeDir     string
 	serviceVersion uint64
 	stateChecksum  []byte
 }
@@ -66,7 +68,10 @@ func (launcher *Launcher) addInstanceToCurrentList(instance InstanceInfo) *insta
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
 
-	info := &instanceInfo{InstanceInfo: instance}
+	info := &instanceInfo{
+		InstanceInfo: instance,
+		runtimeDir:   filepath.Join(runtimeDir, instance.InstanceID),
+	}
 
 	launcher.currentInstances[instance.InstanceID] = info
 
