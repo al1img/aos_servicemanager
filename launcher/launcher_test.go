@@ -88,6 +88,11 @@ type testResourceManager struct {
 
 type testNetworkManager struct{}
 
+type testRegistrar struct {
+	sync.Mutex
+	secrets map[string]string
+}
+
 type testInstance struct {
 	serviceID      string
 	serviceVersion uint64
@@ -264,7 +269,7 @@ func TestRunInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager())
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -303,7 +308,7 @@ func TestUpdateInstances(t *testing.T) {
 	instanceRunner := newTestRunner(nil, nil)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager())
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -358,7 +363,7 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager())
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -419,7 +424,7 @@ func TestStopAllInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager())
+		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -531,7 +536,7 @@ func TestSubjectsChanged(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager())
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -575,7 +580,7 @@ func TestHostFSDir(t *testing.T) {
 		HostBinds:  hostFSBinds,
 	},
 		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil), newTestResourceManager(),
-		newTestNetworkManager())
+		newTestNetworkManager(), newTestRegistrar())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -631,9 +636,10 @@ func TestRuntimeSpec(t *testing.T) {
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
+	testRegistrar := newTestRegistrar()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager)
+		newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -666,7 +672,8 @@ func TestRuntimeSpec(t *testing.T) {
 					{Name: "video", Permissions: "rw"},
 					{Name: "sound", Permissions: "rwm"},
 				},
-				Resources: []string{"resource1", "resource2", "resource3"},
+				Resources:   []string{"resource1", "resource2", "resource3"},
+				Permissions: map[string]map[string]string{"perm1": {"key1": "val1"}},
 			},
 		},
 	}
@@ -950,6 +957,8 @@ func TestRuntimeSpec(t *testing.T) {
 	// Check env vars
 
 	envVars = append(envVars, testInstaces[0].imageConfig.Config.Env...)
+	envVars = append(envVars, getAosEnvVars(instance)...)
+	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceID]))
 
 	if !compareArrays(len(envVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
 		return envVars[index1] == runtimeSpec.Process.Env[index2]
@@ -1302,6 +1311,43 @@ func (manager *testNetworkManager) RemoveInstanceFromNetwork(instanceID, network
 
 func (manager *testNetworkManager) GetInstanceIP(instanceID, networkID string) (string, error) {
 	return "", nil
+}
+
+/***********************************************************************************************************************
+ * testRegistrar
+ **********************************************************************************************************************/
+
+func newTestRegistrar() *testRegistrar {
+	return &testRegistrar{secrets: make(map[string]string)}
+}
+
+func (registrar *testRegistrar) RegisterInstance(
+	instanceID string, permissions map[string]map[string]string) (secret string, err error) {
+	registrar.Lock()
+	defer registrar.Unlock()
+
+	if _, ok := registrar.secrets[instanceID]; ok {
+		return "", aoserrors.Errorf("instance %s already registered", instanceID)
+	}
+
+	secret = uuid.NewString()
+
+	registrar.secrets[instanceID] = secret
+
+	return secret, nil
+}
+
+func (registrar *testRegistrar) UnregisterInstance(instanceID string) error {
+	registrar.Lock()
+	defer registrar.Unlock()
+
+	if _, ok := registrar.secrets[instanceID]; !ok {
+		return aoserrors.Errorf("instance %s is not registered", instanceID)
+	}
+
+	delete(registrar.secrets, instanceID)
+
+	return nil
 }
 
 /***********************************************************************************************************************
@@ -1757,4 +1803,13 @@ groupLoop:
 	}
 
 	return gids, nil
+}
+
+func getAosEnvVars(instance launcher.InstanceInfo) (aosEnvVars []string) {
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SERVICE_ID=%s", instance.ServiceID))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SUBJECT_ID=%s", instance.SubjectID))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_INDEX=%d", instance.Index))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_ID=%s", instance.InstanceID))
+
+	return aosEnvVars
 }

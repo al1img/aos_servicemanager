@@ -37,6 +37,7 @@ type instanceInfo struct {
 	runtimeDir     string
 	serviceVersion uint64
 	stateChecksum  []byte
+	secret         string
 }
 
 /***********************************************************************************************************************

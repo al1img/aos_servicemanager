@@ -99,6 +99,12 @@ type NetworkManager interface {
 	GetInstanceIP(instanceID, networkID string) (string, error)
 }
 
+// InstanceRegistrar provides API to register/unregister instance.
+type InstanceRegistrar interface {
+	RegisterInstance(instanceID string, permissions map[string]map[string]string) (secret string, err error)
+	UnregisterInstance(instanceID string) error
+}
+
 // InstanceInfo instance information.
 type InstanceInfo struct {
 	ServiceID   string
@@ -132,11 +138,12 @@ type UpdateInstancesStatus struct {
 type Launcher struct {
 	sync.Mutex
 
-	storage         Storage
-	serviceProvider ServiceProvider
-	instanceRunner  InstanceRunner
-	resourceManager ResourceManager
-	networkManager  NetworkManager
+	storage           Storage
+	serviceProvider   ServiceProvider
+	instanceRunner    InstanceRunner
+	resourceManager   ResourceManager
+	networkManager    NetworkManager
+	instanceRegistrar InstanceRegistrar
 
 	config                 *config.Config
 	currentSubjects        []string
@@ -170,12 +177,13 @@ var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolin
 // New creates new launcher object.
 func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, instanceRunner InstanceRunner,
 	resourceManager ResourceManager, networkManager NetworkManager,
+	instanceRegistrar InstanceRegistrar,
 ) (launcher *Launcher, err error) {
 	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
-		resourceManager: resourceManager, networkManager: networkManager,
+		resourceManager: resourceManager, networkManager: networkManager, instanceRegistrar: instanceRegistrar,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
@@ -494,6 +502,18 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 	})
 }
 
+func (launcher *Launcher) releaseRuntime(instance *instanceInfo, service *serviceInfo) (err error) {
+	if service == nil || service.serviceConfig.Permissions != nil {
+		if registerErr := launcher.instanceRegistrar.UnregisterInstance(instance.InstanceID); registerErr != nil {
+			if err == nil {
+				err = aoserrors.Wrap(registerErr)
+			}
+		}
+	}
+
+	return err
+}
+
 func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 	log.WithFields(instance.logFields()).Debug("Stop instance")
 
@@ -507,7 +527,20 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 
 	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil {
 		if err == nil {
-			err = runnerErr
+			err = aoserrors.Wrap(runnerErr)
+		}
+	}
+
+	service, serviceErr := launcher.getCurrentServiceInfo(instance.ServiceID)
+	if serviceErr != nil {
+		if err == nil {
+			err = aoserrors.Wrap(serviceErr)
+		}
+	}
+
+	if releaseErr := launcher.releaseRuntime(instance, service); releaseErr != nil {
+		if err == nil {
+			err = aoserrors.Wrap(releaseErr)
 		}
 	}
 
@@ -586,6 +619,22 @@ func (launcher *Launcher) doStartAction(instance InstanceInfo, restart bool) {
 	})
 }
 
+func (launcher *Launcher) setupRuntime(instance *instanceInfo, service *serviceInfo) error {
+	if service.serviceConfig.Permissions != nil {
+		secret, err := launcher.instanceRegistrar.RegisterInstance(
+			instance.InstanceID, service.serviceConfig.Permissions)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		instance.secret = secret
+	}
+
+	// TODO: Resource alert
+
+	return nil
+}
+
 func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	log.WithFields(instance.logFields()).Debug("Start instance")
 
@@ -602,6 +651,10 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	}
 
 	if err := os.MkdirAll(instance.runtimeDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := launcher.setupRuntime(instance, service); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
