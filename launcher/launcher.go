@@ -162,7 +162,9 @@ func (launcher *Launcher) Close() (err error) {
 
 	launcher.cancelFunction()
 
-	return nil
+	launcher.stopInstances(nil)
+
+	return err
 }
 
 // SendCurrentRuntimeStatus forces launcher to send current runtime status.
@@ -233,6 +235,10 @@ func (launcher *Launcher) RunInstances(instances []cloudprotocol.InstanceInfo) e
 func (launcher *Launcher) StopAllInstances() error {
 	launcher.Lock()
 	defer launcher.Unlock()
+
+	launcher.currentSubjects = nil
+
+	launcher.stopInstances(nil)
 
 	return nil
 }

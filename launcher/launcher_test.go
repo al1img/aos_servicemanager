@@ -292,6 +292,69 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 	}
 }
 
+func TestStopAllInstances(t *testing.T) {
+	runningInstances := make(map[string]runner.InstanceStatus)
+
+	serviceProvider := newTestServiceProvider()
+	instanceRunner := newTestRunner(
+		func(instanceID string) runner.InstanceStatus {
+			status := runner.InstanceStatus{InstanceID: instanceID, State: cloudprotocol.InstanceStateActive}
+
+			runningInstances[instanceID] = status
+
+			return status
+		},
+		func(instanceID string) error {
+			delete(runningInstances, instanceID)
+
+			return nil
+		},
+	)
+
+	testLauncher, err := launcher.New(&config.Config{}, newTestStorage(), serviceProvider, instanceRunner)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer testLauncher.Close()
+
+	testInstances := []testInstance{
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
+	}
+
+	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+		t.Fatalf("Can't create test services: %s", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+		t.Fatalf("Can't run instances: %s", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %s", err)
+	}
+
+	if len(runtimeStatus.RunStatus.Instances) != len(runningInstances) {
+		t.Errorf("Wrong running instances count: %d", len(runningInstances))
+	}
+
+	if err = testLauncher.StopAllInstances(); err != nil {
+		t.Errorf("Can't stop instances: %s", err)
+	}
+
+	if len(runningInstances) != 0 {
+		t.Errorf("Wrong running instances count: %d", len(runningInstances))
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
