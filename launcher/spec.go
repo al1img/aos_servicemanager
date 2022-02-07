@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
@@ -89,6 +90,8 @@ type serviceConfig struct {
 	Devices            []serviceDevice              `json:"devices,omitempty"`
 	Resources          []string                     `json:"resources,omitempty"`
 	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
+	// TODO: update kb documentation
+	AlertRules *aostypes.ServiceAlertRules `json:"alertRules,omitempty"`
 }
 
 type runtimeSpec struct {
@@ -572,6 +575,12 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo, service *ser
 	spec.bindHostDirs(launcher.config.WorkingDir)
 	spec.setNamespacePath(runtimespec.NetworkNamespace, launcher.networkManager.GetNetnsPath(instance.InstanceID))
 	spec.mergeEnv(createAosEnvVars(instance))
+
+	if instance.statePath != "" {
+		if err := spec.addBindMount(instance.statePath, instanceStateFile, "rw"); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+	}
 
 	if err := spec.setUserUIDGID(uint32(instance.UID), uint32(service.GID)); err != nil {
 		return nil, aoserrors.Wrap(err)

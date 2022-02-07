@@ -38,6 +38,9 @@ type instanceInfo struct {
 	serviceVersion uint64
 	stateChecksum  []byte
 	secret         string
+	storagePath    string
+	statePath      string
+	ipAddress      string
 }
 
 /***********************************************************************************************************************
