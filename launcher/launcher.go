@@ -26,17 +26,22 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/utils/action"
+	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/google/uuid"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/monitoring"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
@@ -59,6 +64,8 @@ const (
 	instanceRootFS         = "rootfs"
 	instanceMountPointsDir = "mounts"
 	instanceStateFile      = "/state.dat"
+	upperDirName           = "upperdir"
+	workDirName            = "workdir"
 )
 
 /***********************************************************************************************************************
@@ -80,6 +87,11 @@ type Storage interface {
 type ServiceProvider interface {
 	GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error)
 	GetImageParts(service servicemanager.ServiceInfo) (servicemanager.ImageParts, error)
+}
+
+// LayerProvider layer provider.
+type LayerProvider interface {
+	GetLayerInfoByDigest(digest string) (layermanager.LayerInfo, error)
 }
 
 // InstanceRunner interface to start/stop service instances.
@@ -165,6 +177,7 @@ type Launcher struct {
 
 	storage           Storage
 	serviceProvider   ServiceProvider
+	layerProvider     LayerProvider
 	instanceRunner    InstanceRunner
 	resourceManager   ResourceManager
 	networkManager    NetworkManager
@@ -189,6 +202,13 @@ type Launcher struct {
  * Vars
  **********************************************************************************************************************/
 
+// Mount, unmount instance FS functions.
+// nolint:gochecknoglobals
+var (
+	MountFunc   = fs.OverlayMount
+	UnmountFunc = fs.Umount
+)
+
 var (
 	// ErrNotExist not exist instance error.
 	ErrNotExist = errors.New("instance not exist")
@@ -203,17 +223,18 @@ var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolin
  **********************************************************************************************************************/
 
 // New creates new launcher object.
-func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, instanceRunner InstanceRunner,
-	resourceManager ResourceManager, networkManager NetworkManager, instanceRegistrar InstanceRegistrar,
-	storageProvider StorageProvider, stateProvider StateProvider,
+func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, layerProvider LayerProvider,
+	instanceRunner InstanceRunner, resourceManager ResourceManager, networkManager NetworkManager,
+	instanceRegistrar InstanceRegistrar, storageProvider StorageProvider, stateProvider StateProvider,
 	instanceMonitor InstanceMonitor,
 ) (launcher *Launcher, err error) {
 	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
-		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
-		resourceManager: resourceManager, networkManager: networkManager, instanceRegistrar: instanceRegistrar,
-		storageProvider: storageProvider, stateProvider: stateProvider, instanceMonitor: instanceMonitor,
+		storage: storage, serviceProvider: serviceProvider, layerProvider: layerProvider,
+		instanceRunner: instanceRunner, resourceManager: resourceManager, networkManager: networkManager,
+		instanceRegistrar: instanceRegistrar, storageProvider: storageProvider, stateProvider: stateProvider,
+		instanceMonitor: instanceMonitor,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
@@ -633,6 +654,12 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		}
 	}
 
+	if unmountErr := UnmountFunc(filepath.Join(instance.runtimeDir, instanceRootFS)); unmountErr != nil {
+		if err == nil {
+			err = aoserrors.Wrap(unmountErr)
+		}
+	}
+
 	if removeErr := os.RemoveAll(filepath.Join(runtimeDir, instance.InstanceID)); removeErr != nil {
 		if err == nil {
 			err = removeErr
@@ -884,7 +911,12 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 		return aoserrors.Wrap(err)
 	}
 
-	if _, err = launcher.createRuntimeSpec(instance, service); err != nil {
+	runtimeSpec, err := launcher.createRuntimeSpec(instance, service)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := launcher.prepareRootFS(instance, service, runtimeSpec); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1006,6 +1038,147 @@ rootLabel:
 		// Create whiteout for not allowed items
 		if err = syscall.Mknod(itemPath, syscall.S_IFCHR, int(unix.Mkdev(0, 0))); err != nil {
 			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func prepareStorageDir(path string, uid, gid int) (upperDir, workDir string, err error) {
+	upperDir = filepath.Join(path, upperDirName)
+	workDir = filepath.Join(path, workDirName)
+
+	if err = os.MkdirAll(upperDir, 0o755); err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	if err = os.Chown(upperDir, uid, gid); err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	if err = os.Chown(workDir, uid, gid); err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	return upperDir, workDir, nil
+}
+
+func (launcher *Launcher) prepareRootFS(
+	instance *instanceInfo, service *serviceInfo, runtimeConfig *runtimeSpec,
+) error {
+	mountPointsDir := filepath.Join(instance.runtimeDir, instanceMountPointsDir)
+
+	if err := launcher.createMountPoints(mountPointsDir, runtimeConfig.ociSpec.Mounts); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	imageParts, err := launcher.serviceProvider.GetImageParts(service.ServiceInfo)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	layersDir := []string{mountPointsDir, imageParts.ServiceFSPath}
+
+	for _, digest := range imageParts.LayersDigest {
+		layer, err := launcher.layerProvider.GetLayerInfoByDigest(digest)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		layersDir = append(layersDir, layer.Path)
+	}
+
+	layersDir = append(layersDir, path.Join(launcher.config.WorkingDir, hostFSWiteoutsDir), "/")
+
+	rootfsDir := filepath.Join(instance.runtimeDir, instanceRootFS)
+
+	if err = os.MkdirAll(rootfsDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	var upperDir, workDir string
+
+	if instance.storagePath != "" {
+		if upperDir, workDir, err = prepareStorageDir(instance.storagePath, instance.UID, service.GID); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	if err = MountFunc(rootfsDir, layersDir, workDir, upperDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func getMountPermissions(mount runtimespec.Mount) (permissions uint64, err error) {
+	for _, option := range mount.Options {
+		nameValue := strings.Split(strings.TrimSpace(option), "=")
+
+		if len(nameValue) > 1 && nameValue[0] == "mode" {
+			if permissions, err = strconv.ParseUint(nameValue[1], 8, 32); err != nil {
+				return 0, aoserrors.Wrap(err)
+			}
+		}
+	}
+
+	return permissions, nil
+}
+
+func createMountPoint(path string, mount runtimespec.Mount, isDir bool) error {
+	permissions, err := getMountPermissions(mount)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	mountPoint := filepath.Join(path, mount.Destination)
+
+	if isDir {
+		if err := os.MkdirAll(mountPoint, 0o755); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	} else {
+		if err = os.MkdirAll(filepath.Dir(mountPoint), 0o755); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		file, err := os.OpenFile(mountPoint, os.O_CREATE, 0o644)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+		defer file.Close()
+	}
+
+	if permissions != 0 {
+		if err := os.Chmod(mountPoint, os.FileMode(permissions)); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) createMountPoints(path string, mounts []runtimespec.Mount) error {
+	for _, mount := range mounts {
+		switch mount.Type {
+		case "proc", "tmpfs", "sysfs":
+			if err := createMountPoint(path, mount, true); err != nil {
+				return aoserrors.Wrap(err)
+			}
+
+		case "bind":
+			stat, err := os.Stat(mount.Source)
+			if err != nil {
+				return aoserrors.Wrap(err)
+			}
+
+			if err := createMountPoint(path, mount, stat.IsDir()); err != nil {
+				return aoserrors.Wrap(err)
+			}
 		}
 	}
 
