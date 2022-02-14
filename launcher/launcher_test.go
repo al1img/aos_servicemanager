@@ -1579,6 +1579,18 @@ func (provider *testServiceProvider) GetImageParts(
 	}, nil
 }
 
+func (provider *testServiceProvider) ValidateService(service servicemanager.ServiceInfo) error {
+	return nil
+}
+
+func (provider *testServiceProvider) ApplyService(service servicemanager.ServiceInfo) error {
+	return nil
+}
+
+func (provider *testServiceProvider) RevertService(service servicemanager.ServiceInfo) error {
+	return nil
+}
+
 func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance) error {
 	provider.services = make(map[string]serviceInfo)
 
@@ -1596,6 +1608,7 @@ func (provider *testServiceProvider) fromTestInstances(testInstances []testInsta
 				ServiceProvider: testInstance.serviceProvider,
 				ImagePath:       servicePath,
 				GID:             testInstance.serviceGID,
+				IsActive:        true,
 			},
 			layerDigests: testInstance.layerDigests,
 		}
