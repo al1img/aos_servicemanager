@@ -81,6 +81,8 @@ type Storage interface {
 	GetAllInstances() ([]InstanceInfo, error)
 	GetRunningInstances() ([]InstanceInfo, error)
 	GetSubjectInstances(subjectID string) ([]InstanceInfo, error)
+	GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error)
+	SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error
 }
 
 // ServiceProvider service provider.
@@ -200,6 +202,7 @@ type Launcher struct {
 	currentServices        map[string]*serviceInfo
 	errorServices          []cloudprotocol.ServiceStatus
 	uidPool                *uidgidpool.IdentifierPool
+	currentEnvVars         []cloudprotocol.EnvVarsInstanceInfo
 }
 
 /***********************************************************************************************************************
@@ -261,6 +264,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 
 	if err = os.MkdirAll(runtimeDir, 0o755); err != nil {
 		return nil, aoserrors.Wrap(err)
+	}
+
+	if launcher.currentEnvVars, err = launcher.storage.GetOverrideEnvVars(); err != nil {
+		log.Errorf("Can't get current env vars: %s", err)
 	}
 
 	// TODO: remove not needed DB entries
@@ -407,7 +414,11 @@ func (launcher *Launcher) OverrideEnvVars(
 	launcher.Lock()
 	defer launcher.Unlock()
 
-	return nil, nil
+	envVarsStatus := launcher.setEnvVars(envVarsInfo)
+
+	launcher.updateInstancesEnvVars()
+
+	return envVarsStatus, nil
 }
 
 // RuntimeStatusChannel returns runtime status channel.

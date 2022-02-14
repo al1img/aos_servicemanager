@@ -41,6 +41,7 @@ type instanceInfo struct {
 	storagePath    string
 	statePath      string
 	ipAddress      string
+	envVars        []string
 }
 
 /***********************************************************************************************************************

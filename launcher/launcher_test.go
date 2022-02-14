@@ -77,6 +77,7 @@ const (
 type testStorage struct {
 	sync.RWMutex
 	instances map[string]launcher.InstanceInfo
+	envVars   []cloudprotocol.EnvVarsInstanceInfo
 }
 
 type testServiceProvider struct {
@@ -1503,6 +1504,22 @@ func (storage *testStorage) GetAllInstances() (instances []launcher.InstanceInfo
 	}
 
 	return instances, nil
+}
+
+func (storage *testStorage) GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error) {
+	storage.RLock()
+	defer storage.RUnlock()
+
+	return storage.envVars, nil
+}
+
+func (storage *testStorage) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error {
+	storage.Lock()
+	defer storage.Unlock()
+
+	storage.envVars = envVarsInfo
+
+	return nil
 }
 
 func (storage *testStorage) getInstanceByID(instanceID string) (launcher.InstanceInfo, error) {
