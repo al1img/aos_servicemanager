@@ -190,33 +190,6 @@ func (c *Context) FindCertificate(id []byte, label []byte, serial *big.Int) (*x5
 	return cert, err
 }
 
-// FindCertificateWithAttributes retrieves a previously imported certificate with selected attributes.
-func (c *Context) FindCertificateWithAttributes(template AttributeSet) (*x509.Certificate, error) {
-	if c.closed.Get() {
-		return nil, errClosed
-	}
-
-	var cert *x509.Certificate
-	err := c.withSession(func(session *pkcs11Session) (err error) {
-		handles, err := findCertificatesWithAttributes(session, template.ToSlice())
-		if err != nil {
-			return err
-		}
-
-		if len(handles) == 0 {
-			return nil
-		}
-
-		if cert, err = getX509Certificate(session, handles[0]); err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	return cert, err
-}
-
 // FindCertificateChain retrieves a previously imported certificate chain. Any combination of id, label
 // and serial can be provided. An error is return if all are nil.
 func (c *Context) FindCertificateChain(id []byte, label []byte, serial *big.Int) (certs []*x509.Certificate, err error) {
@@ -389,40 +362,24 @@ func (c *Context) DeleteCertificate(id []byte, label []byte, serial *big.Int) er
 		return errors.New("id, label and serial cannot all be nil")
 	}
 
-	template := NewAttributeSet()
+	var template []*pkcs11.Attribute
 
 	if id != nil {
-		if err := template.Set(pkcs11.CKA_ID, id); err != nil {
-			return err
-		}
+		template = append(template, pkcs11.NewAttribute(pkcs11.CKA_ID, id))
 	}
 	if label != nil {
-		if err := template.Set(pkcs11.CKA_LABEL, label); err != nil {
-			return err
-		}
+		template = append(template, pkcs11.NewAttribute(pkcs11.CKA_LABEL, label))
 	}
 	if serial != nil {
 		asn1Serial, err := asn1.Marshal(serial)
 		if err != nil {
 			return err
 		}
-		if err := template.Set(pkcs11.CKA_SERIAL_NUMBER, asn1Serial); err != nil {
-			return err
-		}
+		template = append(template, pkcs11.NewAttribute(pkcs11.CKA_SERIAL_NUMBER, asn1Serial))
 	}
 
-	return c.DeleteCertificateWithAttributes(template)
-}
-
-// DeleteCertificateWithAttributes destroys a previously imported certificate by selected attributes.
-// It will return nil if succeeds or if the certificate does not exist.
-func (c *Context) DeleteCertificateWithAttributes(template AttributeSet) error {
-	if c.closed.Get() {
-		return errClosed
-	}
-
-	err := c.withSession(func(session *pkcs11Session) (err error) {
-		handles, err := findCertificatesWithAttributes(session, template.ToSlice())
+	err := c.withSession(func(session *pkcs11Session) error {
+		handles, err := findCertificatesWithAttributes(session, template)
 		if err != nil {
 			return err
 		}
