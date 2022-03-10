@@ -17,6 +17,8 @@
 
 package action
 
+// TODO: remove
+
 import (
 	"container/list"
 	"sync"

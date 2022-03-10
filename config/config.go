@@ -43,11 +43,13 @@ const (
  * Types
  ******************************************************************************/
 
+// TODO: Remove duration use from common
 // Duration represents duration in format "00:00:00".
 type Duration struct {
 	time.Duration
 }
 
+// TODO: Use from common
 // AlertRule describes alert rule.
 type AlertRule struct {
 	MinTimeout   Duration `json:"minTimeout"`

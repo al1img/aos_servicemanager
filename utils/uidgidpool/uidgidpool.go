@@ -15,7 +15,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package launcher provides set of API to controls services lifecycle
 package uidgidpool
 
 import (

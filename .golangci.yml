@@ -1,15 +1,39 @@
 linters:
-  enable:
-    - structcheck
-    - varcheck
-    - staticcheck
-    - unconvert
-    - gofmt
-    - goimports
-    - revive
-    - ineffassign
-    - vet
-    - unused
-    - misspell
+  enable-all: true
   disable:
-    - errcheck
+    - varnamelen
+    - exhaustivestruct
+    - paralleltest
+    - gochecknoinits
+    - gci
+    - exhaustive
+    - nlreturn
+    - cyclop
+    - nestif
+    - unparam
+
+linters-settings:
+  revive:
+    rules:
+      - name: line-length-limit
+        arguments: [120]
+
+  gosec:
+    excludes:
+      - G204
+
+  gofumpt:
+    lang-version: "1.14"
+
+issues:
+  include:
+    - EXC0002
+
+  exclude-rules:
+    - path: _test.go
+      linters:
+        - funlen
+        - cyclop
+        - gochecknoglobals
+        - gocognit
+        - gocyclo

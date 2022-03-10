@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
@@ -62,6 +63,15 @@ const monitoringChannelSize = 64
 /*******************************************************************************
  * Types
  ******************************************************************************/
+
+// MonitorParams instance monitoring parameters.
+type MonitorParams struct {
+	UID         int
+	GID         int
+	IPAddress   string
+	StoragePath string
+	AlertRules  *aostypes.ServiceAlertRules
+}
 
 // MonitoringAndAlertSender interface to send resource alerts.
 type MonitoringAndAlertSender interface { //nolint
